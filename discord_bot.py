@@ -518,6 +518,8 @@ def classify_command(text: str) -> tuple[str, str]:
             return "resource_usage", "laptop"
         return "resource_usage", "all"
     comparison_dates = stock_market.extract_dates(text)
+    if intent_router.looks_like_investment_action(text):
+        return "investment_action", text
     if len(comparison_dates) >= 2 and any(word in value for word in ("saham", "naik", "turun", "kenaikan", "perubahan", "banding")):
         ticker = re.search(r"\b(?:saham|untuk|ticker|kode)\s+([A-Z0-9]{4,5})\b", text, re.I) or re.search(r"\b([A-Z0-9]{4,5})\b", text)
         if ticker:
@@ -529,6 +531,8 @@ def classify_command(text: str) -> tuple[str, str]:
     stock_match = re.search(r"\b(?:cek\s+)?(?:saham|analisis\s+saham|harga\s+saham)\s+([A-Z0-9][A-Z0-9._-]{0,19})\b", text, re.I)
     if stock_match:
         return "stock_lookup", stock_match.group(1).upper()
+    if intent_router.looks_like_virtual_office_service_recommendation(text):
+        return "service_recommendation", text
     product_intent = intent_router.route_product_search(text)
     if product_intent is not None:
         return "product_search", text
@@ -578,6 +582,8 @@ def classify_command(text: str) -> tuple[str, str]:
         return "stock_latest", ""
     if command_templates.match(value):
         return "template", value
+    if intent_router.looks_like_content_draft(text):
+        return "content_draft", text
     if value in {"help", "bantuan", "apa yang bisa kamu lakukan"} or (
         "help" in value and any(term in value for term in ("menu", "daftar", "apa aja", "apa saja"))
     ) or any(term in value for term in (
@@ -700,6 +706,18 @@ async def run_readonly(kind: str, target: str = "all") -> str:
 
 async def _dispatch_text(text: str, requester_id: int | None = None) -> str:
     kind, value = classify_command(text)
+    if kind == "investment_action":
+        audit("investment_action_blocked", requester_id=requester_id)
+        return ("📈 Gue tidak bisa mengeksekusi atau memberi perintah beli/jual saham. "
+                "Gue bisa bantu analisis edukatif berbasis ticker dan data bertanggal, "
+                "dengan risiko dan ketidakpastian yang jelas.")
+    if kind == "service_recommendation":
+        audit("service_recommendation_unverified", requester_id=requester_id)
+        return ("🏢 Ini permintaan rekomendasi layanan virtual office, bukan pencarian listing marketplace. "
+                "Gue belum bisa memverifikasi provider atau harga live dari sumber yang tersedia, "
+                "jadi jangan anggap angka/provider dari jawaban AI sebagai fakta. Sebutkan kota, "
+                "kebutuhan alamat/legalitas, budget, dan layanan surat/meeting yang dibutuhkan "
+                "kalau mau dibuatkan kriteria perbandingan.")
     if kind == "business_price":
         try:
             result = await asyncio.to_thread(business_advisor.analyze_price, value)
@@ -859,6 +877,8 @@ async def _dispatch_text(text: str, requester_id: int | None = None) -> str:
         return ("⛔ Tindakan perubahan belum diaktifkan. Saya tidak akan menebak target atau "
                 "menjalankan konfigurasi. Gunakan perintah read-only, atau daftarkan executor "
                 "spesifik setelah target, dampak, dan rollback ditentukan.")
+    if kind == "content_draft":
+        return "📝 Ini permintaan pembuatan draft/konten, bukan perubahan sistem. Kirim detail format, audiens, dan tujuan agar Hermes menyusunnya sebagai draft."
     return "Perintah belum dikenali. Ketik `/help` untuk daftar perintah yang tersedia."
 
 
@@ -1000,7 +1020,7 @@ async def natural_reply(channel_id: int, text: str, requester_id: int | None = N
     if requester_id is not None and not can_access_mikrotik(requester_id, kind, value):
         audit("mikrotik_access_denied", requester_id=requester_id, kind=kind, target=value)
         return "🔒 Data MikroTik hanya bisa dicek oleh Henka."
-    if kind != "unknown":
+    if kind not in {"unknown", "content_draft"}:
         return await dispatch_text(text, requester_id)
     history_key = (channel_id, requester_id or 0)
     history = conversation_history.setdefault(history_key, [])

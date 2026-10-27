@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,13 @@ _VIRTUAL_OFFICE_TERMS = (
 _EXPLICIT_SHOPPING_TERMS = (
     "belanja", "beli", "listing", "toko online", "marketplace", "e-commerce", "ecommerce",
 )
+_CONTENT_DRAFT_TERMS = (
+    "sop", "layout", "onboarding", "materi", "konten", "copywriting",
+    "dokumentasi", "naskah", "desain", "draft", "rencana", "workflow",
+)
+_CONTENT_DRAFT_ACTIONS = ("buat", "buatkan", "bikinin", "susun", "tulis", "rancang", "bantu")
+_INVESTMENT_ACTIONS = ("beli", "jual", "buy", "sell", "borong", "entry", "exit", "masuk posisi")
+_SERVICE_TERMS = ("provider", "penyedia", "harga", "biaya", "pilihan", "paket", "rekomendasi")
 
 
 def normalize(text: str) -> str:
@@ -53,3 +61,26 @@ def route_product_search(text: str) -> Intent | None:
     if not any(term in value for term in _SHOPPING_OBJECTS):
         return None
     return Intent("product_search", text, "high")
+
+
+def looks_like_virtual_office_service_recommendation(text: str) -> bool:
+    value = normalize(text)
+    return (
+        is_virtual_office_request(value)
+        and any(term in value for term in _SERVICE_TERMS)
+        and not any(term in value for term in _EXPLICIT_SHOPPING_TERMS)
+    )
+
+
+def looks_like_content_draft(text: str) -> bool:
+    value = normalize(text)
+    return any(term in value for term in _CONTENT_DRAFT_ACTIONS) and any(term in value for term in _CONTENT_DRAFT_TERMS)
+
+
+def looks_like_investment_action(text: str) -> bool:
+    value = normalize(text)
+    if not any(term in value for term in _INVESTMENT_ACTIONS):
+        return False
+    if any(term in value for term in ("saham", "investasi", "reksadana", "crypto", "kripto")):
+        return True
+    return bool(re.search(r"\b[A-Z]{4}\b", str(text)))
