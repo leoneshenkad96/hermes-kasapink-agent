@@ -37,6 +37,26 @@ class IntentRouterTests(unittest.IsolatedAsyncioTestCase):
             "service_recommendation",
         )
 
+    def test_questions_about_changes_do_not_become_actions(self):
+        question_cases = (
+            "Gimana cara update layout virtual office",
+            "Bisa update Hermes",
+            "Gue mau tanya cara restart Hermes",
+            "Jelaskan cara mengubah harga produk",
+            "Apa yang perlu diubah di layout virtual office?",
+        )
+        for text in question_cases:
+            with self.subTest(text=text):
+                self.assertNotIn(
+                    discord_bot.classify_command(text)[0],
+                    {"mutation_blocked", "local_action_proposal"},
+                )
+
+    def test_explicit_change_instructions_remain_guarded(self):
+        self.assertEqual(discord_bot.classify_command("Tolong update layout virtual office")[0], "mutation_blocked")
+        self.assertEqual(discord_bot.classify_command("Update konfigurasi Discord sekarang")[0], "mutation_blocked")
+        self.assertEqual(discord_bot.classify_command("Hapus data lama")[0], "mutation_blocked")
+
     async def test_investment_action_does_not_call_stock_worker(self):
         with patch.object(discord_bot.stock_market, "analyze") as analyze, patch.object(discord_bot, "audit"):
             reply = await discord_bot.dispatch_text("Beli saham ASII", 246656697949618179)

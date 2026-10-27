@@ -496,9 +496,8 @@ def classify_command(text: str) -> tuple[str, str]:
     """Deterministic safe router; usable even without an LLM API key."""
     raw_value = " ".join(text.lower().strip().split())
     value = normalize_command(text)
-    question_like = value.endswith("?") or any(term in value for term in (
-        "apakah", "bisa gak", "bisa nggak", "udah bisa", "sudah bisa", "bisa ya",
-        "gimana", "boleh gak", "boleh nggak", "kenapa", "kok",
+    question_like = intent_router.looks_like_question(value) or any(term in value for term in (
+        "bisa gak", "bisa nggak", "udah bisa", "sudah bisa", "bisa ya", "boleh gak", "boleh nggak", "kok",
     ))
     ram_query = any(term in value for term in ("ram", "memory", "memori"))
     educational_ram = any(term in value for term in ("apa itu", "fungsi ram", "kebutuhan ram", "ram yang dibutuhkan", "berapa ram yang dibutuhkan", "biasanya dibutuhkan"))

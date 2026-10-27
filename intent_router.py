@@ -39,10 +39,20 @@ _CONTENT_DRAFT_TERMS = (
 _CONTENT_DRAFT_ACTIONS = ("buat", "buatkan", "bikinin", "susun", "tulis", "rancang", "bantu")
 _INVESTMENT_ACTIONS = ("beli", "jual", "buy", "sell", "borong", "entry", "exit", "masuk posisi")
 _SERVICE_TERMS = ("provider", "penyedia", "harga", "biaya", "pilihan", "paket", "rekomendasi")
+_QUESTION_PREFIXES = (
+    "apakah", "apa ", "kenapa", "mengapa", "gimana", "bagaimana", "cara ",
+    "bisa ", "boleh ", "jelaskan", "jelasin", "mau tanya", "ingin tahu",
+    "bedanya ", "perbedaan ",
+)
 
 
 def normalize(text: str) -> str:
     return " ".join(str(text).lower().strip().split())
+
+
+def looks_like_question(text: str) -> bool:
+    value = normalize(text)
+    return value.endswith("?") or any(value.startswith(prefix) or f" {prefix}" in value for prefix in _QUESTION_PREFIXES)
 
 
 def is_virtual_office_request(text: str) -> bool:
