@@ -183,6 +183,26 @@ def configured_providers() -> list[str]:
     return providers
 
 
+def deterministic_fallback(history: list[dict[str, str]]) -> str | None:
+    """Answer a small safe subset when both AI providers are unavailable.
+
+    This is deliberately modest: it never presents a guessed runtime fact or
+    pretends that a tool/read has been executed. Unknown questions get one
+    useful clarification instead of a provider-shaped error message.
+    """
+    user_messages = [str(item.get("content", "")).strip() for item in history if item.get("role") == "user"]
+    if not user_messages:
+        return None
+    value = " ".join(user_messages[-1].lower().split())
+    if any(greeting in value for greeting in ("halo", "hai", "hi", "hello", "pagi", "siang", "malam")):
+        return "Bisa dong. Gue online dan siap bantu. Mau ngobrol atau mau gue cek sistem?"
+    if value in {"help", "bantuan", "kamu bisa apa", "lu bisa apa", "fitur kamu"}:
+        return "Gue bisa bantu ngobrol, merangkum, dan menjalankan perintah read-only yang tersedia. Untuk cek sistem, sebutkan targetnya—misalnya `cek status` atau `cek ERP`."
+    if any(term in value for term in ("terima kasih", "makasih", "thanks", "thx")):
+        return "Sama-sama. Kalau ada yang mau dicek atau dirapikan, kirim detailnya."
+    return "Provider AI sedang tidak tersedia. Jelaskan tujuan atau target yang ingin dibantu dalam satu kalimat; perintah read-only tetap bisa dipakai."
+
+
 def summarize(history: list[dict[str, str]], context: str = "") -> tuple[str | None, str | None]:
     """Create a compact durable-memory summary without exposing raw credentials."""
     transcript = "\n".join(

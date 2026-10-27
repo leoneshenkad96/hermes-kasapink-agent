@@ -52,6 +52,9 @@ import external_changes
 import alert_dedup
 import runtime_info
 import message_dedup
+import intent_router
+import permission_guard
+from worker_dispatcher import WorkerDispatcher
 from file_lock import exclusive
 
 # Python 3.14 + discord.py can format the gateway heartbeat warning badly
@@ -85,6 +88,7 @@ AUDIT_FILE = Path(os.getenv("HERMES_AUDIT_FILE", "./data/command-audit.jsonl"))
 IDLE_ALERT_MINUTES = int(os.getenv("HERMES_IDLE_ALERT_MINUTES", "180"))
 LAST_IDLE_ALERT = datetime.now(timezone.utc)
 conversation_history: dict[tuple[int, int], list[dict[str, str]]] = {}
+WORKER_DISPATCHER = WorkerDispatcher()
 JAKARTA_TZ = timezone(timedelta(hours=7), name="WIB")
 DAILY_REPORT_FILE = Path(os.getenv("HERMES_DAILY_REPORT_STATE", "./data/daily-report.json"))
 STOCK_REPORT_FILE = Path(os.getenv("HERMES_STOCK_REPORT_STATE", "./data/stock-report.json"))
@@ -153,6 +157,11 @@ def can_request_local_action(user_id: int | str) -> bool:
 
 def can_access_mikrotik(user_id: int | str, kind: str, target: str = "") -> bool:
     return is_mikrotik_owner(user_id) or not access_policy.mikrotik_only_command(kind, target)
+
+
+def permission_level_for(kind: str, *, approved: bool = False) -> permission_guard.PermissionLevel:
+    """Expose the command capability contract for adapters and tests."""
+    return permission_guard.level_for(kind, approved=approved)
 
 
 async def reject(interaction: discord.Interaction) -> None:
@@ -520,7 +529,8 @@ def classify_command(text: str) -> tuple[str, str]:
     stock_match = re.search(r"\b(?:cek\s+)?(?:saham|analisis\s+saham|harga\s+saham)\s+([A-Z0-9][A-Z0-9._-]{0,19})\b", text, re.I)
     if stock_match:
         return "stock_lookup", stock_match.group(1).upper()
-    if product_research.looks_like_product_search(text):
+    product_intent = intent_router.route_product_search(text)
+    if product_intent is not None:
         return "product_search", text
     if business_advisor.parse_price_question(text):
         return "business_price", text
@@ -688,7 +698,7 @@ async def run_readonly(kind: str, target: str = "all") -> str:
     return f"**{target}**: **{data.get('status', 'UNKNOWN')}**"
 
 
-async def dispatch_text(text: str, requester_id: int | None = None) -> str:
+async def _dispatch_text(text: str, requester_id: int | None = None) -> str:
     kind, value = classify_command(text)
     if kind == "business_price":
         try:
@@ -852,6 +862,14 @@ async def dispatch_text(text: str, requester_id: int | None = None) -> str:
     return "Perintah belum dikenali. Ketik `/help` untuk daftar perintah yang tersedia."
 
 
+WORKER_DISPATCHER.register("command", _dispatch_text)
+
+
+async def dispatch_text(text: str, requester_id: int | None = None) -> str:
+    """Dispatch a command through the serialized worker boundary."""
+    return await WORKER_DISPATCHER.dispatch("command", text, requester_id)
+
+
 def chat_context(query: str, requester_id: int | None = None, channel_id: int | None = None) -> str:
     technical = knowledge_base.retrieve(query)
     official = official_sources.context_for(query)
@@ -992,6 +1010,10 @@ async def natural_reply(channel_id: int, text: str, requester_id: int | None = N
     reply, provider = await asyncio.to_thread(llm_chat.chat, history, context)
     if reply is None:
         history.pop()
+        fallback = await asyncio.to_thread(llm_chat.deterministic_fallback, [{"role": "user", "content": text}])
+        if fallback:
+            audit("chat", provider="deterministic-fallback")
+            return fallback
         configured = await asyncio.to_thread(llm_chat.configured_providers)
         if configured:
             return ("⚠️ Provider AI sudah terkonfigurasi (" + ", ".join(configured) + "), "

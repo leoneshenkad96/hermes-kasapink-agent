@@ -5,6 +5,10 @@ import llm_chat
 
 
 class LlmContinuationTests(unittest.TestCase):
+    def test_deterministic_fallback_is_safe_and_useful(self):
+        self.assertIn("siap bantu", llm_chat.deterministic_fallback([{"role": "user", "content": "Halo Hermes"}]))
+        self.assertIn("Provider AI", llm_chat.deterministic_fallback([{"role": "user", "content": "Analisis ini"}]))
+
     def test_system_prompt_enforces_direct_and_truthful_ram_responses(self):
         self.assertIn("Hindari basa-basi", llm_chat.SYSTEM_PROMPT)
         self.assertIn("jangan menebak", llm_chat.SYSTEM_PROMPT)
