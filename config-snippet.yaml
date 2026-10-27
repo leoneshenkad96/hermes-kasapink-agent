@@ -1,0 +1,21 @@
+# Review and merge manually into Hermes config.yaml; this file is not auto-applied.
+# Keep mutating toolsets disabled until approval flow is tested.
+platform_toolsets:
+  telegram: [hermes-telegram]
+  discord: [hermes-discord]
+
+agent:
+  disabled_toolsets:
+    - discord_admin
+
+# If custom toolsets are used, expose only read-only ERP/router tools here.
+# mcp_servers:
+#   kasapink_readonly:
+#     command: python
+#     args: ["path/to/kasapink_mcp.py"]
+#     enabled_tools: [health, list_menus, get_menu_evidence]
+#   mikrotik_readonly:
+#     command: python
+#     args: ["path/to/mikrotik_mcp.py"]
+#     enabled_tools: [system_resource, interfaces, routes]
+

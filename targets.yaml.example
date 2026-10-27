@@ -1,0 +1,30 @@
+# Copy to a protected local file and fill only with real read-only endpoints.
+# Do not put passwords or API tokens in this file.
+
+targets:
+  erp:
+    kasapink:
+      aliases: [kasapink, erp kasapink, erp utama]
+      environment: production
+      health_url: ${KASAPINK_HEALTH_URL}
+      access: read_only
+      enabled: false
+
+  mikrotik:
+    kantor_pusat:
+      aliases: [mikrotik kantor, router utama, mikrotik pusat]
+      api_url: ${MIKROTIK_API_URL}
+      access: read_only
+      enabled: false
+    lan_controller:
+      aliases: [lan controller, mikrotik lan, rb5009]
+      api_url: ${MIKROTIK_LAN_API_URL}
+      access: read_only
+      enabled: false
+
+defaults:
+  erp: kasapink
+  mikrotik: kantor_pusat
+
+ambiguity_policy: ask_user
+mutation_policy: explicit_approval_required

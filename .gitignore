@@ -1,0 +1,40 @@
+
+.env
+.env.*
+!.env.example
+node_modules/
+.venv/
+venv/
+__pycache__/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+credentials/
+secrets/
+
+# Runtime files
+*.lock
+*.lock.lock
+*.pid
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Runtime directories
+data/
+work/
+
+# Credentials
+.env
+.env.*
+!.env.example
+credentials/
+secrets/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
