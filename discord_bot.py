@@ -52,6 +52,10 @@ import external_changes
 import alert_dedup
 import runtime_info
 import message_dedup
+import intent_router
+import permission_guard
+import discord_connectivity
+from worker_dispatcher import WorkerDispatcher
 from file_lock import exclusive
 
 # Python 3.14 + discord.py can format the gateway heartbeat warning badly
@@ -85,6 +89,7 @@ AUDIT_FILE = Path(os.getenv("HERMES_AUDIT_FILE", "./data/command-audit.jsonl"))
 IDLE_ALERT_MINUTES = int(os.getenv("HERMES_IDLE_ALERT_MINUTES", "180"))
 LAST_IDLE_ALERT = datetime.now(timezone.utc)
 conversation_history: dict[tuple[int, int], list[dict[str, str]]] = {}
+WORKER_DISPATCHER = WorkerDispatcher()
 JAKARTA_TZ = timezone(timedelta(hours=7), name="WIB")
 DAILY_REPORT_FILE = Path(os.getenv("HERMES_DAILY_REPORT_STATE", "./data/daily-report.json"))
 STOCK_REPORT_FILE = Path(os.getenv("HERMES_STOCK_REPORT_STATE", "./data/stock-report.json"))
@@ -153,6 +158,11 @@ def can_request_local_action(user_id: int | str) -> bool:
 
 def can_access_mikrotik(user_id: int | str, kind: str, target: str = "") -> bool:
     return is_mikrotik_owner(user_id) or not access_policy.mikrotik_only_command(kind, target)
+
+
+def permission_level_for(kind: str, *, approved: bool = False) -> permission_guard.PermissionLevel:
+    """Expose the command capability contract for adapters and tests."""
+    return permission_guard.level_for(kind, approved=approved)
 
 
 async def reject(interaction: discord.Interaction) -> None:
@@ -487,9 +497,8 @@ def classify_command(text: str) -> tuple[str, str]:
     """Deterministic safe router; usable even without an LLM API key."""
     raw_value = " ".join(text.lower().strip().split())
     value = normalize_command(text)
-    question_like = value.endswith("?") or any(term in value for term in (
-        "apakah", "bisa gak", "bisa nggak", "udah bisa", "sudah bisa", "bisa ya",
-        "gimana", "boleh gak", "boleh nggak", "kenapa", "kok",
+    question_like = intent_router.looks_like_question(value) or any(term in value for term in (
+        "bisa gak", "bisa nggak", "udah bisa", "sudah bisa", "bisa ya", "boleh gak", "boleh nggak", "kok",
     ))
     ram_query = any(term in value for term in ("ram", "memory", "memori"))
     educational_ram = any(term in value for term in ("apa itu", "fungsi ram", "kebutuhan ram", "ram yang dibutuhkan", "berapa ram yang dibutuhkan", "biasanya dibutuhkan"))
@@ -509,6 +518,8 @@ def classify_command(text: str) -> tuple[str, str]:
             return "resource_usage", "laptop"
         return "resource_usage", "all"
     comparison_dates = stock_market.extract_dates(text)
+    if intent_router.looks_like_investment_action(text):
+        return "investment_action", text
     if len(comparison_dates) >= 2 and any(word in value for word in ("saham", "naik", "turun", "kenaikan", "perubahan", "banding")):
         ticker = re.search(r"\b(?:saham|untuk|ticker|kode)\s+([A-Z0-9]{4,5})\b", text, re.I) or re.search(r"\b([A-Z0-9]{4,5})\b", text)
         if ticker:
@@ -520,7 +531,10 @@ def classify_command(text: str) -> tuple[str, str]:
     stock_match = re.search(r"\b(?:cek\s+)?(?:saham|analisis\s+saham|harga\s+saham)\s+([A-Z0-9][A-Z0-9._-]{0,19})\b", text, re.I)
     if stock_match:
         return "stock_lookup", stock_match.group(1).upper()
-    if product_research.looks_like_product_search(text):
+    if intent_router.looks_like_virtual_office_service_recommendation(text):
+        return "service_recommendation", text
+    product_intent = intent_router.route_product_search(text)
+    if product_intent is not None:
         return "product_search", text
     if business_advisor.parse_price_question(text):
         return "business_price", text
@@ -568,6 +582,8 @@ def classify_command(text: str) -> tuple[str, str]:
         return "stock_latest", ""
     if command_templates.match(value):
         return "template", value
+    if intent_router.looks_like_content_draft(text):
+        return "content_draft", text
     if value in {"help", "bantuan", "apa yang bisa kamu lakukan"} or (
         "help" in value and any(term in value for term in ("menu", "daftar", "apa aja", "apa saja"))
     ) or any(term in value for term in (
@@ -688,8 +704,20 @@ async def run_readonly(kind: str, target: str = "all") -> str:
     return f"**{target}**: **{data.get('status', 'UNKNOWN')}**"
 
 
-async def dispatch_text(text: str, requester_id: int | None = None) -> str:
+async def _dispatch_text(text: str, requester_id: int | None = None) -> str:
     kind, value = classify_command(text)
+    if kind == "investment_action":
+        audit("investment_action_blocked", requester_id=requester_id)
+        return ("📈 Gue tidak bisa mengeksekusi atau memberi perintah beli/jual saham. "
+                "Gue bisa bantu analisis edukatif berbasis ticker dan data bertanggal, "
+                "dengan risiko dan ketidakpastian yang jelas.")
+    if kind == "service_recommendation":
+        audit("service_recommendation_unverified", requester_id=requester_id)
+        return ("🏢 Ini permintaan rekomendasi layanan virtual office, bukan pencarian listing marketplace. "
+                "Gue belum bisa memverifikasi provider atau harga live dari sumber yang tersedia, "
+                "jadi jangan anggap angka/provider dari jawaban AI sebagai fakta. Sebutkan kota, "
+                "kebutuhan alamat/legalitas, budget, dan layanan surat/meeting yang dibutuhkan "
+                "kalau mau dibuatkan kriteria perbandingan.")
     if kind == "business_price":
         try:
             result = await asyncio.to_thread(business_advisor.analyze_price, value)
@@ -849,7 +877,17 @@ async def dispatch_text(text: str, requester_id: int | None = None) -> str:
         return ("⛔ Tindakan perubahan belum diaktifkan. Saya tidak akan menebak target atau "
                 "menjalankan konfigurasi. Gunakan perintah read-only, atau daftarkan executor "
                 "spesifik setelah target, dampak, dan rollback ditentukan.")
+    if kind == "content_draft":
+        return "📝 Ini permintaan pembuatan draft/konten, bukan perubahan sistem. Kirim detail format, audiens, dan tujuan agar Hermes menyusunnya sebagai draft."
     return "Perintah belum dikenali. Ketik `/help` untuk daftar perintah yang tersedia."
+
+
+WORKER_DISPATCHER.register("command", _dispatch_text)
+
+
+async def dispatch_text(text: str, requester_id: int | None = None) -> str:
+    """Dispatch a command through the serialized worker boundary."""
+    return await WORKER_DISPATCHER.dispatch("command", text, requester_id)
 
 
 def chat_context(query: str, requester_id: int | None = None, channel_id: int | None = None) -> str:
@@ -982,7 +1020,7 @@ async def natural_reply(channel_id: int, text: str, requester_id: int | None = N
     if requester_id is not None and not can_access_mikrotik(requester_id, kind, value):
         audit("mikrotik_access_denied", requester_id=requester_id, kind=kind, target=value)
         return "🔒 Data MikroTik hanya bisa dicek oleh Henka."
-    if kind != "unknown":
+    if kind not in {"unknown", "content_draft"}:
         return await dispatch_text(text, requester_id)
     history_key = (channel_id, requester_id or 0)
     history = conversation_history.setdefault(history_key, [])
@@ -992,6 +1030,10 @@ async def natural_reply(channel_id: int, text: str, requester_id: int | None = N
     reply, provider = await asyncio.to_thread(llm_chat.chat, history, context)
     if reply is None:
         history.pop()
+        fallback = await asyncio.to_thread(llm_chat.deterministic_fallback, [{"role": "user", "content": text}])
+        if fallback:
+            audit("chat", provider="deterministic-fallback")
+            return fallback
         configured = await asyncio.to_thread(llm_chat.configured_providers)
         if configured:
             return ("⚠️ Provider AI sudah terkonfigurasi (" + ", ".join(configured) + "), "
@@ -2153,6 +2195,8 @@ if __name__ == "__main__":
     instance_lock = Path(os.getenv("HERMES_DISCORD_INSTANCE_LOCK", "./data/discord-bot-instance.lock"))
     try:
         with exclusive(instance_lock):
+            dns = discord_connectivity.wait_for_dns()
+            print(f"Discord DNS preflight: {'ready' if dns['ready'] else 'degraded'}; hosts={dns['hosts']}")
             bot.run(TOKEN)
     except OSError as exc:
         print(f"Discord bot instance already active; exiting ({type(exc).__name__})")

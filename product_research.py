@@ -7,6 +7,8 @@ import os
 import urllib.parse
 import urllib.request
 
+import intent_router
+
 
 ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 MARKETPLACE_DOMAINS = ("shopee.co.id", "tokopedia.com", "blibli.com", "lazada.co.id")
@@ -18,20 +20,7 @@ class SearchNotConfigured(RuntimeError):
 
 
 def looks_like_product_search(text: str) -> bool:
-    value = " ".join(text.lower().split())
-    actions = (
-        "cari harga", "cek harga", "carikan", "cariin", "rekomendasi",
-        "bandingkan", "bandingin", "perbandingan", "compare", "cari produk",
-        "cari barang", "di e-commerce", "di ecommerce", "di marketplace",
-    )
-    products = (
-        "barang", "produk", "tablet", "laptop", "hp", "ponsel", "handphone",
-        "smartphone", "tv", "televisi", "monitor", "headphone", "earphone",
-        "kamera", "printer", "smartwatch", "jam tangan", "kulkas", "mesin cuci",
-        "vacuum", "sepatu", "tas", "parfum", "kursi", "meja", "ssd", "ram",
-        "router", "perangkat", "marketplace", "e-commerce", "ecommerce",
-    )
-    return any(term in value for term in actions) and any(term in value for term in products)
+    return intent_router.route_product_search(text) is not None
 
 
 def _allowed_marketplace(url: str) -> bool:
