@@ -54,6 +54,7 @@ import runtime_info
 import message_dedup
 import intent_router
 import permission_guard
+import discord_connectivity
 from worker_dispatcher import WorkerDispatcher
 from file_lock import exclusive
 
@@ -2194,6 +2195,8 @@ if __name__ == "__main__":
     instance_lock = Path(os.getenv("HERMES_DISCORD_INSTANCE_LOCK", "./data/discord-bot-instance.lock"))
     try:
         with exclusive(instance_lock):
+            dns = discord_connectivity.wait_for_dns()
+            print(f"Discord DNS preflight: {'ready' if dns['ready'] else 'degraded'}; hosts={dns['hosts']}")
             bot.run(TOKEN)
     except OSError as exc:
         print(f"Discord bot instance already active; exiting ({type(exc).__name__})")
