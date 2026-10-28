@@ -61,6 +61,14 @@ class FreeRouterTests(unittest.TestCase):
             os.environ['CLOUDFLARE_AI_MODEL']='@cf/deepseek-ai/deepseek-v4-pro-0813'
             self.assertNotIn('cloudflare',r.configured())
 
+    def test_corrupt_usage_ledger_fails_closed(self):
+        with tempfile.TemporaryDirectory() as folder:
+            file = folder + '/requests.json'
+            with open(file, 'w', encoding='utf-8') as output:
+                output.write('{broken')
+            with patch.dict(os.environ, {'HERMES_PROVIDER_USAGE_FILE':file}):
+                self.assertFalse(r._claim_budget('openrouter'))
+
     def test_task_type_deterministic(self):
         self.assertEqual(r.task_type([{'role':'user','content':'Tolong audit SQL dan patch React'}]),'coding')
         self.assertEqual(r.task_type([{'role':'user','content':'Monitoring jaringan DNS'}]),'operations')
