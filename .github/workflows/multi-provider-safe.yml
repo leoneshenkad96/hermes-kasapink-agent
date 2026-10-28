@@ -1,0 +1,19 @@
+name: Hermes multi-provider safe tests
+on:
+  pull_request:
+  push:
+    branches:
+      - feat/hermes-free-multiprovider-20261028
+jobs:
+  multi-provider:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Syntax and unit tests (mocked; no credentials)
+        run: |
+          python -m py_compile llm_chat.py multi_provider.py tests/test_multi_provider.py
+          python -m unittest discover -s tests -p 'test_multi_provider.py' -v
+          python -m unittest discover -s tests -p 'test_llm_chat.py' -v
