@@ -105,8 +105,11 @@ def _claim_budget(name: str) -> bool:
     with _LOCK:
         try:
             data = json.loads(root.read_text(encoding='utf-8'))
-        except (OSError, ValueError):
+        except FileNotFoundError:
             data = {}
+        except (OSError, ValueError):
+            # A damaged counter must not silently reset the free-tier allowance.
+            return False
         if data.get('day') != day:
             data = {'day': day, 'counts': {}}
         counts = data['counts']
