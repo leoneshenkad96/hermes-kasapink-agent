@@ -54,7 +54,7 @@ def _spec(name: str):
         return (key if valid_account and safe_model and _yes('CLOUDFLARE_FREE_PLAN_CONFIRMED') else '', model)
     if name == 'ollama':
         model = os.getenv('OLLAMA_MODEL', '').strip()
-        return ('local' if _yes('HERMES_OLLAMA_ENABLED') and model else '', model)
+        return ('local' if _yes('HERMES_OLLAMA_ENABLED') and model and not model.endswith(':cloud') else '', model)
     return ('', '')
 
 
