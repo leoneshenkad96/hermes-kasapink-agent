@@ -160,6 +160,15 @@ def chat(history: list[dict[str, str]], context: str) -> tuple[str | None, str |
     messages = [{"role": "system", "content": SYSTEM_PROMPT + "\nKonteks terbaru:\n" + context}]
     short_term_limit = max(10, min(20, int(os.getenv("HERMES_SHORT_TERM_MESSAGES", "20"))))
     messages.extend(history[-short_term_limit:])
+    # Experimental free-tier router is strictly opt-in; legacy Groq/Gemini
+    # remain untouched when HERMES_MULTI_PROVIDER_ENABLED is unset.
+    import multi_provider
+    if multi_provider.enabled():
+        try:
+            return multi_provider.complete(messages, _complete_with_continuations, _groq, _gemini, OUTPUT_TOKEN_LIMIT)
+        except Exception:
+            # Fail safe: optional router bugs must never bring down Discord chat.
+            pass
     if os.getenv("GROQ_API_KEY", "").strip():
         try:
             return _complete_with_continuations(_groq, messages), "groq"
@@ -180,6 +189,11 @@ def configured_providers() -> list[str]:
         providers.append("groq")
     if os.getenv("GOOGLE_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip():
         providers.append("gemini")
+    import multi_provider
+    if multi_provider.enabled():
+        for name in multi_provider.configured():
+            if name not in providers:
+                providers.append(name)
     return providers
 
 
