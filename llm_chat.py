@@ -9,6 +9,8 @@ import urllib.parse
 import urllib.request
 from typing import Any
 
+import provider_router
+
 
 SYSTEM_PROMPT = """Kamu adalah Hermes, asisten pribadi dan partner diskusi kreatif Henka: cerdas, praktis, analitis, dan asik. Bantu urusan sehari-hari (merangkum informasi, menyusun pesan) serta merancang ide, naskah, dan copywriting. Buat tulisan terasa natural dan sesuai konteks; jangan mengklaim hasil pasti “100% seperti manusia”.
 Langsung jawab inti atau berikan langkah paling berguna pada kalimat pertama. Hindari basa-basi dan pembuka robotik seperti “Tentu saja”, “Berikut jawabannya”, atau “Mari kita bahas”.
@@ -160,27 +162,23 @@ def chat(history: list[dict[str, str]], context: str) -> tuple[str | None, str |
     messages = [{"role": "system", "content": SYSTEM_PROMPT + "\nKonteks terbaru:\n" + context}]
     short_term_limit = max(10, min(20, int(os.getenv("HERMES_SHORT_TERM_MESSAGES", "20"))))
     messages.extend(history[-short_term_limit:])
-    if os.getenv("GROQ_API_KEY", "").strip():
-        try:
-            return _complete_with_continuations(_groq, messages), "groq"
-        except (OSError, ValueError, KeyError, urllib.error.HTTPError, urllib.error.URLError):
-            pass
-    if os.getenv("GOOGLE_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip():
-        try:
-            return _complete_with_continuations(_gemini, messages), "gemini"
-        except (OSError, ValueError, KeyError, urllib.error.HTTPError, urllib.error.URLError):
-            pass
+    selected_provider: list[str] = []
+
+    def generate(current: list[dict[str, str]]) -> tuple[str, bool]:
+        answer, provider, truncated = provider_router.generate(current, OUTPUT_TOKEN_LIMIT)
+        selected_provider[:] = [provider]
+        return answer, truncated
+
+    try:
+        return _complete_with_continuations(generate, messages), (selected_provider[0] if selected_provider else None)
+    except provider_router.ProviderUnavailable:
+        pass
     return None, None
 
 
 def configured_providers() -> list[str]:
     """Return configured provider names without exposing credentials."""
-    providers: list[str] = []
-    if os.getenv("GROQ_API_KEY", "").strip():
-        providers.append("groq")
-    if os.getenv("GOOGLE_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip():
-        providers.append("gemini")
-    return providers
+    return provider_router.configured_providers()
 
 
 def summarize(history: list[dict[str, str]], context: str = "") -> tuple[str | None, str | None]:
@@ -204,16 +202,10 @@ def summarize(history: list[dict[str, str]], context: str = "") -> tuple[str | N
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": prompt},
     ]
-    if os.getenv("GROQ_API_KEY", "").strip():
-        try:
-            return _groq(messages, MEMORY_SUMMARY_TOKEN_LIMIT)[0].strip(), "groq"
-        except (OSError, ValueError, KeyError, urllib.error.HTTPError, urllib.error.URLError):
-            pass
-    if os.getenv("GOOGLE_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip():
-        try:
-            return _gemini(messages, MEMORY_SUMMARY_TOKEN_LIMIT)[0].strip(), "gemini"
-        except (OSError, ValueError, KeyError, urllib.error.HTTPError, urllib.error.URLError):
-            pass
+    try:
+        return provider_router.generate(messages, MEMORY_SUMMARY_TOKEN_LIMIT)[:2]
+    except provider_router.ProviderUnavailable:
+        pass
     return None, None
 
 
@@ -229,26 +221,4 @@ def _get(url: str, headers: dict[str, str]) -> int:
 
 def provider_status() -> dict[str, str]:
     """Validate provider access without returning keys or response bodies."""
-    result: dict[str, str] = {}
-    groq_key = os.getenv("GROQ_API_KEY", "").strip()
-    if not groq_key:
-        result["groq"] = "NOT_CONFIGURED"
-    else:
-        try:
-            result["groq"] = "VALID" if _get("https://api.groq.com/openai/v1/models", {"Authorization": f"Bearer {groq_key}"}) == 200 else "ERROR"
-        except urllib.error.HTTPError as exc:
-            result["groq"] = f"HTTP_{exc.code}"
-        except (OSError, ValueError):
-            result["groq"] = "NETWORK_ERROR"
-
-    gemini_key = (os.getenv("GOOGLE_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip())
-    if not gemini_key:
-        result["google_ai_studio"] = "NOT_CONFIGURED"
-    else:
-        try:
-            result["google_ai_studio"] = "VALID" if _get("https://generativelanguage.googleapis.com/v1beta/models", {"x-goog-api-key": gemini_key}) == 200 else "ERROR"
-        except urllib.error.HTTPError as exc:
-            result["google_ai_studio"] = f"HTTP_{exc.code}"
-        except (OSError, ValueError):
-            result["google_ai_studio"] = "NETWORK_ERROR"
-    return result
+    return provider_router.status(check=True)
